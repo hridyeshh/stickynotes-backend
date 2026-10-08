@@ -1,0 +1,5 @@
+.env
+*client_secret*.json
+bin/
+*.log
+.DS_Store

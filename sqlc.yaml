@@ -20,3 +20,6 @@ sql:
             go_type: "time.Time"
           - db_type: "pg_catalog.timestamptz"
             go_type: "time.Time"
+          # Anchors pass through to clients as JSON, not base64.
+          - column: "highlights.anchor"
+            go_type: "encoding/json.RawMessage"

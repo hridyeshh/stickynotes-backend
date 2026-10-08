@@ -25,6 +25,7 @@ import (
 	"github.com/hridyeshh/stickynotes-backend/internal/config"
 	"github.com/hridyeshh/stickynotes-backend/internal/db"
 	appMiddleware "github.com/hridyeshh/stickynotes-backend/internal/middleware"
+	"github.com/hridyeshh/stickynotes-backend/internal/notes"
 	"github.com/hridyeshh/stickynotes-backend/internal/types"
 	"github.com/hridyeshh/stickynotes-backend/migrations"
 )
@@ -92,6 +93,7 @@ func main() {
 // routes builds the HTTP handler. It is separate from main so tests run the real router.
 func routes(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
 	authH := auth.NewHandler(db.New(pool), cfg)
+	notesH := notes.NewHandler(pool)
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RealIP) // trusts X-Forwarded-For: right behind Railway's proxy, wrong if exposed directly
@@ -127,11 +129,16 @@ func routes(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
 			r.Post("/refresh", authH.Refresh)
 			r.Post("/logout", authH.Logout)
 		})
+		// The extension trades a single-use code and its PKCE verifier for its own session.
+		r.With(limit(20)).Post("/extension/token", authH.ExtensionToken)
 
 		r.Group(func(r chi.Router) {
 			r.Use(appMiddleware.Authenticate(cfg.JWTSecret))
 			r.Get("/me", authH.Me)
 			r.Delete("/me", authH.DeleteMe)
+			r.Post("/extension/codes", authH.ExtensionCode)
+			r.Post("/sync/push", notesH.Push)
+			r.Get("/sync/pull", notesH.Pull)
 		})
 	})
 

@@ -5,6 +5,7 @@
 package db
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ type Highlight struct {
 	SourceID  uuid.UUID          `json:"source_id"`
 	Text      string             `json:"text"`
 	Section   string             `json:"section"`
-	Anchor    []byte             `json:"anchor"`
+	Anchor    json.RawMessage    `json:"anchor"`
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`

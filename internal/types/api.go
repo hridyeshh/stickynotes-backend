@@ -12,6 +12,22 @@ func WriteJSON(w http.ResponseWriter, statusCode int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// ExtensionCodeRequest is the body of POST /extension/codes.
+type ExtensionCodeRequest struct {
+	CodeChallenge string `json:"code_challenge"`
+}
+
+// ExtensionCodeResponse carries the single-use code the web app hands to the extension.
+type ExtensionCodeResponse struct {
+	Code string `json:"code"`
+}
+
+// ExtensionTokenRequest is the body of POST /extension/token.
+type ExtensionTokenRequest struct {
+	Code         string `json:"code"`
+	CodeVerifier string `json:"code_verifier"`
+}
+
 // GoogleAuthRequest is the body of POST /auth/google.
 type GoogleAuthRequest struct {
 	IDToken string `json:"id_token"`

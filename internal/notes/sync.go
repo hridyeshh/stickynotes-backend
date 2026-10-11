@@ -48,7 +48,9 @@ type PushRequest struct {
 // PushAction is one queued change from a device. Ids are client-made UUIDs, kept as
 // strings so one malformed action is rejected alone instead of failing the push.
 type PushAction struct {
-	Type      string          `json:"type"` // create_topic, create_highlight, delete_highlight, move_source
+	// create_topic, create_highlight, delete_highlight, move_source; and from the web
+	// library: rename_topic, delete_topic, merge_topic (id into topic_id).
+	Type      string          `json:"type"`
 	ID        string          `json:"id"`
 	TopicID   string          `json:"topic_id"`
 	Title     string          `json:"title"`
@@ -190,6 +192,11 @@ func apply(ctx context.Context, q *db.Queries, userID uuid.UUID, a PushAction, m
 		if exists, err := q.HighlightExists(ctx, id); err != nil || exists {
 			return "", err
 		}
+		// ponytail: if a live topic took the deleted one's title meanwhile, the note
+		// lands in the deleted topic and stays hidden; route it to that topic if this bites.
+		if err := q.ReviveTopic(ctx, db.ReviveTopicParams{ID: topicID, UserID: userID}); err != nil {
+			return "", err
+		}
 		sourceID, err := q.UpsertSource(ctx, db.UpsertSourceParams{
 			Url: a.URL, Title: clip(a.PageTitle, 300), Site: clip(a.Site, 255), TopicID: topicID, UserID: userID,
 		})
@@ -229,6 +236,54 @@ func apply(ctx context.Context, q *db.Queries, userID uuid.UUID, a PushAction, m
 			return "no such source or topic", nil
 		}
 		return "", nil
+
+	case "rename_topic":
+		title := strings.TrimSpace(a.Title)
+		if idErr != nil || title == "" || utf8.RuneCountInString(title) > 300 {
+			return "rename_topic needs an id and a title of 1-300 characters", nil
+		}
+		n, err := q.RenameTopic(ctx, db.RenameTopicParams{ID: id, UserID: userID, Title: title})
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return "you already have a topic with this title", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if n == 0 {
+			return "no such topic", nil
+		}
+		return "", nil
+
+	case "delete_topic":
+		// Everything in it goes too, as deletion markers, so devices drop it as well.
+		if idErr != nil {
+			return "delete_topic needs an id", nil
+		}
+		p := db.DeleteTopicHighlightsParams{TopicID: id, UserID: userID}
+		if err := q.DeleteTopicHighlights(ctx, p); err != nil {
+			return "", err
+		}
+		if err := q.DeleteTopicSources(ctx, db.DeleteTopicSourcesParams(p)); err != nil {
+			return "", err
+		}
+		return "", q.DeleteTopic(ctx, db.DeleteTopicParams{ID: id, UserID: userID})
+
+	case "merge_topic":
+		if idErr != nil || topicErr != nil || id == topicID {
+			return "merge_topic needs an id and a different topic_id", nil
+		}
+		live, err := q.TopicIsLive(ctx, db.TopicIsLiveParams{ID: topicID, UserID: userID})
+		if err != nil {
+			return "", err
+		}
+		if !live {
+			return "no such topic to merge into", nil
+		}
+		if err := q.MoveTopicSources(ctx, db.MoveTopicSourcesParams{FromID: id, IntoID: topicID, UserID: userID}); err != nil {
+			return "", err
+		}
+		return "", q.DeleteTopic(ctx, db.DeleteTopicParams{ID: id, UserID: userID})
 	}
 	return "unknown action type", nil
 }

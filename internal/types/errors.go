@@ -20,6 +20,7 @@ const (
 	ErrCodeInternalServer = "INTERNAL_ERROR"
 	ErrCodeInvalidToken   = "INVALID_TOKEN"
 	ErrCodeExpiredToken   = "EXPIRED_TOKEN"
+	ErrCodeNotFound       = "NOT_FOUND"
 )
 
 // WriteError writes a JSON error response.

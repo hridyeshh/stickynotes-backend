@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/hridyeshh/stickynotes-backend/internal/config"
@@ -135,7 +137,73 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		types.WriteInternalError(w)
 		return
 	}
-	types.WriteJSON(w, http.StatusOK, toUserResponse(user))
+	devices, err := h.devices(r)
+	if err != nil {
+		slog.Error("me: list devices", "error", err)
+		types.WriteInternalError(w)
+		return
+	}
+	res := types.MeResponse{UserResponse: toUserResponse(user)}
+	for _, d := range devices {
+		if d.Client == "extension" && (res.ExtensionSeenAt == nil || d.LastActive.After(*res.ExtensionSeenAt)) {
+			res.ExtensionSeenAt = &d.LastActive
+		}
+	}
+	types.WriteJSON(w, http.StatusOK, res)
+}
+
+// Devices handles GET /api/v1/devices: every browser and extension signed in.
+func (h *Handler) Devices(w http.ResponseWriter, r *http.Request) {
+	devices, err := h.devices(r)
+	if err != nil {
+		slog.Error("list devices", "error", err)
+		types.WriteInternalError(w)
+		return
+	}
+	types.WriteJSON(w, http.StatusOK, devices)
+}
+
+func (h *Handler) devices(r *http.Request) ([]types.DeviceResponse, error) {
+	id, _ := reqctx.GetUserID(r.Context())
+	rows, err := h.q.ListDevices(r.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]types.DeviceResponse, 0, len(rows))
+	for _, row := range rows {
+		var info struct {
+			UserAgent string `json:"user_agent"`
+			Client    string `json:"client"`
+		}
+		_ = json.Unmarshal(row.DeviceInfo, &info) // a label only: a bad one shows as unknown
+		if info.Client == "" {
+			info.Client = "web"
+		}
+		out = append(out, types.DeviceResponse{ID: row.ID.String(), Client: info.Client, UserAgent: info.UserAgent, LastActive: row.CreatedAt})
+	}
+	return out, nil
+}
+
+// RevokeDevice handles DELETE /api/v1/devices/{id}: that browser or extension is
+// signed out once its access token (at most 15 minutes) runs out.
+func (h *Handler) RevokeDevice(w http.ResponseWriter, r *http.Request) {
+	userID, _ := reqctx.GetUserID(r.Context())
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		types.WriteError(w, http.StatusBadRequest, types.ErrCodeValidation, "Invalid device id")
+		return
+	}
+	n, err := h.q.RevokeDevice(r.Context(), db.RevokeDeviceParams{ID: id, UserID: userID})
+	if err != nil {
+		slog.Error("revoke device", "error", err)
+		types.WriteInternalError(w)
+		return
+	}
+	if n == 0 {
+		types.WriteError(w, http.StatusNotFound, types.ErrCodeNotFound, "No such device")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // DeleteMe handles DELETE /api/v1/me. The account goes, and by cascade every

@@ -51,6 +51,56 @@ func (q *Queries) DeleteSourceIfEmpty(ctx context.Context, arg DeleteSourceIfEmp
 	return err
 }
 
+const deleteTopic = `-- name: DeleteTopic :exec
+UPDATE topics
+SET deleted_at = now(), is_public = false, share_slug = NULL
+WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+`
+
+type DeleteTopicParams struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+// Its share link dies with it.
+func (q *Queries) DeleteTopic(ctx context.Context, arg DeleteTopicParams) error {
+	_, err := q.db.Exec(ctx, deleteTopic, arg.ID, arg.UserID)
+	return err
+}
+
+const deleteTopicHighlights = `-- name: DeleteTopicHighlights :exec
+UPDATE highlights h
+SET deleted_at = now(), text = '', anchor = NULL
+FROM sources s
+WHERE h.source_id = s.id AND s.topic_id = $1 AND h.user_id = $2 AND h.deleted_at IS NULL
+`
+
+type DeleteTopicHighlightsParams struct {
+	TopicID uuid.UUID `json:"topic_id"`
+	UserID  uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) DeleteTopicHighlights(ctx context.Context, arg DeleteTopicHighlightsParams) error {
+	_, err := q.db.Exec(ctx, deleteTopicHighlights, arg.TopicID, arg.UserID)
+	return err
+}
+
+const deleteTopicSources = `-- name: DeleteTopicSources :exec
+UPDATE sources
+SET deleted_at = now()
+WHERE topic_id = $1 AND user_id = $2 AND deleted_at IS NULL
+`
+
+type DeleteTopicSourcesParams struct {
+	TopicID uuid.UUID `json:"topic_id"`
+	UserID  uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) DeleteTopicSources(ctx context.Context, arg DeleteTopicSourcesParams) error {
+	_, err := q.db.Exec(ctx, deleteTopicSources, arg.TopicID, arg.UserID)
+	return err
+}
+
 const highlightExists = `-- name: HighlightExists :one
 SELECT EXISTS (SELECT 1 FROM highlights WHERE id = $1)
 `
@@ -185,6 +235,46 @@ func (q *Queries) MoveSource(ctx context.Context, arg MoveSourceParams) (int64, 
 	return result.RowsAffected(), nil
 }
 
+const moveTopicSources = `-- name: MoveTopicSources :exec
+UPDATE sources s
+SET topic_id = t.id
+FROM topics t
+WHERE s.topic_id = $1 AND s.user_id = $2 AND s.deleted_at IS NULL
+  AND t.id = $3 AND t.user_id = $2 AND t.deleted_at IS NULL
+`
+
+type MoveTopicSourcesParams struct {
+	FromID uuid.UUID `json:"from_id"`
+	UserID uuid.UUID `json:"user_id"`
+	IntoID uuid.UUID `json:"into_id"`
+}
+
+// Merging: every live source of one topic joins another of the user's topics.
+func (q *Queries) MoveTopicSources(ctx context.Context, arg MoveTopicSourcesParams) error {
+	_, err := q.db.Exec(ctx, moveTopicSources, arg.FromID, arg.UserID, arg.IntoID)
+	return err
+}
+
+const renameTopic = `-- name: RenameTopic :execrows
+UPDATE topics
+SET title = $1
+WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL
+`
+
+type RenameTopicParams struct {
+	Title  string    `json:"title"`
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) RenameTopic(ctx context.Context, arg RenameTopicParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameTopic, arg.Title, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resolveTopic = `-- name: ResolveTopic :one
 SELECT id FROM topics
 WHERE user_id = $1 AND (id = $2 OR (lower(title) = lower($3) AND deleted_at IS NULL))
@@ -204,6 +294,29 @@ func (q *Queries) ResolveTopic(ctx context.Context, arg ResolveTopicParams) (uui
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const reviveTopic = `-- name: ReviveTopic :exec
+UPDATE topics t
+SET deleted_at = NULL
+WHERE t.id = $1 AND t.user_id = $2 AND t.deleted_at IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM topics o
+    WHERE o.user_id = t.user_id AND lower(o.title) = lower(t.title) AND o.deleted_at IS NULL
+  )
+`
+
+type ReviveTopicParams struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+// A device that was offline may still save into a topic deleted or merged away
+// elsewhere. Bring it back rather than lose the note, unless a live topic now has
+// its title.
+func (q *Queries) ReviveTopic(ctx context.Context, arg ReviveTopicParams) error {
+	_, err := q.db.Exec(ctx, reviveTopic, arg.ID, arg.UserID)
+	return err
 }
 
 const sourcesSince = `-- name: SourcesSince :many
@@ -250,6 +363,22 @@ func (q *Queries) SourcesSince(ctx context.Context, arg SourcesSinceParams) ([]S
 		return nil, err
 	}
 	return items, nil
+}
+
+const topicIsLive = `-- name: TopicIsLive :one
+SELECT EXISTS (SELECT 1 FROM topics WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL)
+`
+
+type TopicIsLiveParams struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) TopicIsLive(ctx context.Context, arg TopicIsLiveParams) (bool, error) {
+	row := q.db.QueryRow(ctx, topicIsLive, arg.ID, arg.UserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const topicsSince = `-- name: TopicsSince :many

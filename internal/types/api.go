@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 // WriteJSON writes v as JSON with the given status code.
@@ -44,6 +45,21 @@ type UserResponse struct {
 	Email     string `json:"email"`
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatar_url"`
+}
+
+// MeResponse is GET /me: the user, and when a connected extension last refreshed
+// its session (null when none is connected).
+type MeResponse struct {
+	UserResponse
+	ExtensionSeenAt *time.Time `json:"extension_seen_at"`
+}
+
+// DeviceResponse is one signed-in browser or extension, for Settings.
+type DeviceResponse struct {
+	ID         string    `json:"id"`
+	Client     string    `json:"client"` // "extension" or "web"
+	UserAgent  string    `json:"user_agent"`
+	LastActive time.Time `json:"last_active"`
 }
 
 // AuthResponse is returned by sign-in and refresh.

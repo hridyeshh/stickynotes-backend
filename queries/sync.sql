@@ -73,3 +73,48 @@ SELECT h.id, s.url, h.text, h.section, h.anchor, h.created_at, (h.deleted_at IS 
 FROM highlights h
 JOIN sources s ON s.id = h.source_id
 WHERE h.user_id = @user_id AND h.updated_at > @since AND (h.deleted_at IS NULL OR @with_deleted::boolean);
+
+-- name: ReviveTopic :exec
+-- A device that was offline may still save into a topic deleted or merged away
+-- elsewhere. Bring it back rather than lose the note, unless a live topic now has
+-- its title.
+UPDATE topics t
+SET deleted_at = NULL
+WHERE t.id = @id AND t.user_id = @user_id AND t.deleted_at IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM topics o
+    WHERE o.user_id = t.user_id AND lower(o.title) = lower(t.title) AND o.deleted_at IS NULL
+  );
+
+-- name: RenameTopic :execrows
+UPDATE topics
+SET title = @title
+WHERE id = @id AND user_id = @user_id AND deleted_at IS NULL;
+
+-- name: MoveTopicSources :exec
+-- Merging: every live source of one topic joins another of the user's topics.
+UPDATE sources s
+SET topic_id = t.id
+FROM topics t
+WHERE s.topic_id = @from_id AND s.user_id = @user_id AND s.deleted_at IS NULL
+  AND t.id = @into_id AND t.user_id = @user_id AND t.deleted_at IS NULL;
+
+-- name: DeleteTopicHighlights :exec
+UPDATE highlights h
+SET deleted_at = now(), text = '', anchor = NULL
+FROM sources s
+WHERE h.source_id = s.id AND s.topic_id = @topic_id AND h.user_id = @user_id AND h.deleted_at IS NULL;
+
+-- name: DeleteTopicSources :exec
+UPDATE sources
+SET deleted_at = now()
+WHERE topic_id = @topic_id AND user_id = @user_id AND deleted_at IS NULL;
+
+-- name: DeleteTopic :exec
+-- Its share link dies with it.
+UPDATE topics
+SET deleted_at = now(), is_public = false, share_slug = NULL
+WHERE id = @id AND user_id = @user_id AND deleted_at IS NULL;
+
+-- name: TopicIsLive :one
+SELECT EXISTS (SELECT 1 FROM topics WHERE id = @id AND user_id = @user_id AND deleted_at IS NULL);

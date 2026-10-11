@@ -139,7 +139,14 @@ func routes(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
 			r.Post("/extension/codes", authH.ExtensionCode)
 			r.Post("/sync/push", notesH.Push)
 			r.Get("/sync/pull", notesH.Pull)
+			// The web library reads here and edits through /sync/push.
+			r.Get("/library", notesH.Library)
+			r.Post("/topics/{id}/share", notesH.Share)
+			r.Get("/devices", authH.Devices)
+			r.Delete("/devices/{id}", authH.RevokeDevice)
 		})
+		// Public share pages, by unguessable slug.
+		r.Get("/shared/{slug}", notesH.Shared)
 	})
 
 	return r

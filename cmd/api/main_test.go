@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/hridyeshh/stickynotes-backend/internal/config"
+	"github.com/hridyeshh/stickynotes-backend/internal/db"
 	"github.com/hridyeshh/stickynotes-backend/internal/notes"
 	"github.com/hridyeshh/stickynotes-backend/internal/types"
 )
@@ -271,4 +273,136 @@ func rejected(res notes.PushResponse) string {
 		idx = append(idx, strconv.Itoa(r.Index))
 	}
 	return strings.Join(idx, ",")
+}
+
+// TestLibrary covers the web library: reading everything, renames (and their title
+// clash), sharing by link, merges, topic deletes, a note saved offline into a deleted
+// topic, devices, and another account unable to touch any of it.
+func TestLibrary(t *testing.T) {
+	call := newTestAPI(t)
+	signIn := func() types.AuthResponse {
+		var s types.AuthResponse
+		call("POST", "/api/v1/auth/google", "", `{"id_token":"`+uuid.NewString()+`"}`, http.StatusOK, &s)
+		return s
+	}
+	ana, other := signIn(), signIn()
+	tok := ana.AccessToken
+	push := func(bearer string, actions ...string) notes.PushResponse {
+		t.Helper()
+		var res notes.PushResponse
+		call("POST", "/api/v1/sync/push", bearer, `{"actions":[`+strings.Join(actions, ",")+`]}`, http.StatusOK, &res)
+		return res
+	}
+	library := func() notes.LibraryResponse {
+		t.Helper()
+		var res notes.LibraryResponse
+		call("GET", "/api/v1/library", tok, "", http.StatusOK, &res)
+		return res
+	}
+	act := func(typ, id, topicID, title string) string {
+		return fmt.Sprintf(`{"type":%q,"id":%q,"topic_id":%q,"title":%q}`, typ, id, topicID, title)
+	}
+	highlight := func(id, topicID, url string) string {
+		return fmt.Sprintf(`{"type":"create_highlight","id":%q,"topic_id":%q,"url":%q,"page_title":"A page","text":"A note.","created_at":"2026-10-09T08:00:00Z"}`, id, topicID, url)
+	}
+
+	// No extension yet; connecting one shows on /me and in the devices list.
+	var me types.MeResponse
+	call("GET", "/api/v1/me", tok, "", http.StatusOK, &me)
+	if me.ExtensionSeenAt != nil || me.Email != "ana@example.com" {
+		t.Fatalf("/me before connecting: %+v", me)
+	}
+	verifier := strings.Repeat("v", 43)
+	sum := sha256.Sum256([]byte(verifier))
+	var code types.ExtensionCodeResponse
+	call("POST", "/api/v1/extension/codes", tok, `{"code_challenge":"`+base64.RawURLEncoding.EncodeToString(sum[:])+`"}`, http.StatusOK, &code)
+	var ext types.AuthResponse
+	call("POST", "/api/v1/extension/token", "", `{"code":"`+code.Code+`","code_verifier":"`+verifier+`"}`, http.StatusOK, &ext)
+	call("GET", "/api/v1/me", tok, "", http.StatusOK, &me)
+	var devices []types.DeviceResponse
+	call("GET", "/api/v1/devices", tok, "", http.StatusOK, &devices)
+	if me.ExtensionSeenAt == nil || len(devices) != 2 || devices[0].Client != "extension" || devices[1].Client != "web" {
+		t.Fatalf("after connecting: me %+v, devices %+v", me, devices)
+	}
+
+	t1, t2 := uuid.NewString(), uuid.NewString()
+	if res := push(tok, act("create_topic", t1, "", "Consistent hashing"), act("create_topic", t2, "", "Hashing"),
+		highlight(uuid.NewString(), t1, "https://a.example/1"), highlight(uuid.NewString(), t2, "https://b.example/2"),
+		highlight(uuid.NewString(), t2, "https://c.example/3")); len(res.Rejected) != 0 {
+		t.Fatalf("setup push: %+v", res)
+	}
+	if lib := library(); len(lib.Topics) != 2 || len(lib.Sources) != 3 || len(lib.Highlights) != 3 {
+		t.Fatalf("library: %d topics, %d sources, %d highlights", len(lib.Topics), len(lib.Sources), len(lib.Highlights))
+	}
+
+	// Renaming onto another topic's title is refused, ignoring case.
+	if res := push(tok, act("rename_topic", t1, "", " hashing "), act("rename_topic", t1, "", "Consistent hashing, explained")); rejected(res) != "0" ||
+		res.Rejected[0].Error != "you already have a topic with this title" {
+		t.Fatalf("renames: %+v", res)
+	}
+
+	// A shared topic reads without signing in; going private kills the link for good.
+	var share notes.ShareResponse
+	call("POST", "/api/v1/topics/"+t1+"/share", tok, `{"public":true}`, http.StatusOK, &share)
+	first := share.Slug
+	var pub notes.SharedResponse
+	call("GET", "/api/v1/shared/"+first, "", "", http.StatusOK, &pub)
+	if len(first) != 12 || pub.Title != "Consistent hashing, explained" || pub.Author != "Ana Ruiz" || len(pub.Highlights) != 1 || len(pub.Sources) != 1 {
+		t.Fatalf("shared: slug %q, %+v", first, pub)
+	}
+	call("POST", "/api/v1/topics/"+t1+"/share", other.AccessToken, `{"public":true}`, http.StatusNotFound, nil)
+	call("POST", "/api/v1/topics/"+t1+"/share", tok, `{"public":false}`, http.StatusOK, &share)
+	call("GET", "/api/v1/shared/"+first, "", "", http.StatusNotFound, nil)
+	call("POST", "/api/v1/topics/"+t1+"/share", tok, `{"public":true}`, http.StatusOK, &share)
+	if share.Slug == first || !share.Public {
+		t.Fatalf("shared again: %+v, first slug %q", share, first)
+	}
+
+	// Another account can't rename, delete or merge these topics.
+	push(other.AccessToken, act("rename_topic", t1, "", "Mine"), act("delete_topic", t2, "", ""), act("merge_topic", t2, t1, ""))
+	if lib := library(); len(lib.Topics) != 2 || len(lib.Highlights) != 3 {
+		t.Fatalf("after the other account's push: %+v", lib)
+	}
+
+	// Merging moves every source over and removes the emptied topic, on every device.
+	var before notes.PullResponse
+	call("GET", "/api/v1/sync/pull", tok, "", http.StatusOK, &before)
+	if res := push(tok, act("merge_topic", t2, t1, ""), act("merge_topic", t1, t1, "")); rejected(res) != "1" {
+		t.Fatalf("merge: %+v", res)
+	}
+	lib := library()
+	for _, s := range lib.Sources {
+		if s.TopicID.String() != t1 {
+			t.Fatalf("source left behind by the merge: %+v", s)
+		}
+	}
+	if len(lib.Topics) != 1 || len(lib.Sources) != 3 {
+		t.Fatalf("after merge: %+v", lib)
+	}
+	var delta notes.PullResponse
+	call("GET", "/api/v1/sync/pull?cursor="+url.QueryEscape(before.Cursor), tok, "", http.StatusOK, &delta)
+	if !slices.ContainsFunc(delta.Topics, func(x db.TopicsSinceRow) bool { return x.ID.String() == t2 && x.Deleted }) {
+		t.Fatalf("pull after merge lacks the merged topic's deletion: %+v", delta.Topics)
+	}
+
+	// Deleting a topic takes its notes and its share link.
+	push(tok, act("delete_topic", t1, "", ""))
+	if lib := library(); len(lib.Topics)+len(lib.Sources)+len(lib.Highlights) != 0 {
+		t.Fatalf("after delete: %+v", lib)
+	}
+	call("GET", "/api/v1/shared/"+share.Slug, "", "", http.StatusNotFound, nil)
+
+	// A device that was offline saves into the deleted topic: it comes back with that note.
+	push(ext.AccessToken, highlight(uuid.NewString(), t1, "https://d.example/4"))
+	if lib := library(); len(lib.Topics) != 1 || lib.Topics[0].ID.String() != t1 || len(lib.Highlights) != 1 {
+		t.Fatalf("after an offline save: %+v", lib)
+	}
+
+	// Disconnecting a device ends its session; another account can't.
+	call("DELETE", "/api/v1/devices/"+devices[0].ID, other.AccessToken, "", http.StatusNotFound, nil)
+	call("DELETE", "/api/v1/devices/"+devices[0].ID, tok, "", http.StatusNoContent, nil)
+	call("POST", "/api/v1/auth/refresh", "", `{"refresh_token":"`+ext.RefreshToken+`"}`, http.StatusUnauthorized, nil)
+
+	call("DELETE", "/api/v1/me", tok, "", http.StatusNoContent, nil)
+	call("DELETE", "/api/v1/me", other.AccessToken, "", http.StatusNoContent, nil)
 }

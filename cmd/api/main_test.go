@@ -262,6 +262,20 @@ func TestSync(t *testing.T) {
 		t.Fatalf("live copy: %d topics, %d sources, %d highlights", len(now.Topics), len(now.Sources), len(now.Highlights))
 	}
 
+	// A note keeps the highlighter colour it was saved in; one sent without a colour is yellow.
+	hp := uuid.NewString()
+	pink := strings.Replace(highlight(hp, t1, ring, "Pink, for the parts that surprise."), `"text"`, `"color":"pink","text"`, 1)
+	if res := push(tok, pink); len(res.Rejected) != 0 {
+		t.Fatalf("pink push: %+v", res)
+	}
+	colors := map[string]string{}
+	for _, h := range pull(tok, "").Highlights {
+		colors[h.ID.String()] = h.Color
+	}
+	if colors[hp] != "pink" || colors[h1] != "yellow" {
+		t.Fatalf("colours = %v, want pink for the pink note and yellow for one sent without a colour", colors)
+	}
+
 	call("DELETE", "/api/v1/me", web.AccessToken, "", http.StatusNoContent, nil)
 	call("DELETE", "/api/v1/me", other.AccessToken, "", http.StatusNoContent, nil)
 }

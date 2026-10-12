@@ -1,27 +1,38 @@
 package middleware
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"net"
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/httprate"
+	chimw "github.com/go-chi/chi/v5/middleware"
+
+	"github.com/hridyeshh/stickynotes-backend/internal/token"
 )
 
-// KeyByAuthorizationOrIP returns a rate-limit bucket key.
-// When Authorization: Bearer <jwt> is present (e.g. the Next.js server forwarding a
-// session), the key comes from the token so many users behind one egress IP are not
-// collapsed into one bucket. Otherwise it falls back to the client IP.
-func KeyByAuthorizationOrIP(r *http.Request) (string, error) {
-	auth := strings.TrimSpace(r.Header.Get("Authorization"))
-	lower := strings.ToLower(auth)
-	if strings.HasPrefix(lower, "bearer ") {
-		token := strings.TrimSpace(auth[7:])
-		if token != "" {
-			sum := sha256.Sum256([]byte("bearer:" + token))
-			return "auth:" + hex.EncodeToString(sum[:16]), nil
+// KeyByUserOrIP returns a rate-limit bucket key: the user when the request carries a
+// valid access token (the Next.js server forwards sessions, so many users share its
+// egress IP), else the client IP. A made-up or expired token counts as none, so sending
+// a fresh one with every request can't buy a fresh bucket.
+func KeyByUserOrIP(jwtSecret string) func(*http.Request) (string, error) {
+	return func(r *http.Request) (string, error) {
+		if scheme, tok, ok := strings.Cut(r.Header.Get("Authorization"), " "); ok && strings.EqualFold(scheme, "Bearer") {
+			if claims, err := token.Parse(strings.TrimSpace(tok), jwtSecret); err == nil {
+				return "user:" + claims.UserID.String(), nil
+			}
 		}
+		return "ip:" + clientIP(r), nil
 	}
-	return httprate.KeyByIP(r)
+}
+
+// clientIP is the IP the ClientIPFrom* middleware found, or the connection's own when
+// there was no proxy header to read (local runs, tests).
+func clientIP(r *http.Request) string {
+	if ip := chimw.GetClientIP(r.Context()); ip != "" {
+		return ip
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }

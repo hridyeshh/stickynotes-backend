@@ -32,8 +32,8 @@ RETURNING id;
 SELECT EXISTS (SELECT 1 FROM highlights WHERE id = @id);
 
 -- name: InsertHighlight :exec
-INSERT INTO highlights (id, user_id, source_id, text, section, anchor, created_at)
-VALUES (@id, @user_id, @source_id, @text, @section, @anchor, @created_at)
+INSERT INTO highlights (id, user_id, source_id, text, section, anchor, color, created_at)
+VALUES (@id, @user_id, @source_id, @text, @section, @anchor, @color, @created_at)
 ON CONFLICT (id) DO NOTHING;
 
 -- name: DeleteHighlight :one
@@ -69,7 +69,7 @@ FROM sources
 WHERE user_id = @user_id AND updated_at > @since AND (deleted_at IS NULL OR @with_deleted::boolean);
 
 -- name: HighlightsSince :many
-SELECT h.id, s.url, h.text, h.section, h.anchor, h.created_at, (h.deleted_at IS NOT NULL)::boolean AS deleted
+SELECT h.id, s.url, h.text, h.section, h.anchor, h.color, h.created_at, (h.deleted_at IS NOT NULL)::boolean AS deleted
 FROM highlights h
 JOIN sources s ON s.id = h.source_id
 WHERE h.user_id = @user_id AND h.updated_at > @since AND (h.deleted_at IS NULL OR @with_deleted::boolean);

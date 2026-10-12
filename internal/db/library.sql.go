@@ -14,7 +14,7 @@ import (
 )
 
 const libraryHighlights = `-- name: LibraryHighlights :many
-SELECT h.id, h.source_id, h.text, h.section, h.created_at
+SELECT h.id, h.source_id, h.text, h.section, h.color, h.created_at
 FROM highlights h
 JOIN sources s ON s.id = h.source_id
 WHERE h.user_id = $1 AND h.deleted_at IS NULL
@@ -32,6 +32,7 @@ type LibraryHighlightsRow struct {
 	SourceID  uuid.UUID `json:"source_id"`
 	Text      string    `json:"text"`
 	Section   string    `json:"section"`
+	Color     string    `json:"color"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -49,6 +50,7 @@ func (q *Queries) LibraryHighlights(ctx context.Context, arg LibraryHighlightsPa
 			&i.SourceID,
 			&i.Text,
 			&i.Section,
+			&i.Color,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

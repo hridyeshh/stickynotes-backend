@@ -30,6 +30,7 @@ type Highlight struct {
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+	Color     string             `json:"color"`
 }
 
 type RefreshToken struct {

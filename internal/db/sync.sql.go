@@ -114,7 +114,7 @@ func (q *Queries) HighlightExists(ctx context.Context, id uuid.UUID) (bool, erro
 }
 
 const highlightsSince = `-- name: HighlightsSince :many
-SELECT h.id, s.url, h.text, h.section, h.anchor, h.created_at, (h.deleted_at IS NOT NULL)::boolean AS deleted
+SELECT h.id, s.url, h.text, h.section, h.anchor, h.color, h.created_at, (h.deleted_at IS NOT NULL)::boolean AS deleted
 FROM highlights h
 JOIN sources s ON s.id = h.source_id
 WHERE h.user_id = $1 AND h.updated_at > $2 AND (h.deleted_at IS NULL OR $3::boolean)
@@ -132,6 +132,7 @@ type HighlightsSinceRow struct {
 	Text      string          `json:"text"`
 	Section   string          `json:"section"`
 	Anchor    json.RawMessage `json:"anchor"`
+	Color     string          `json:"color"`
 	CreatedAt time.Time       `json:"created_at"`
 	Deleted   bool            `json:"deleted"`
 }
@@ -151,6 +152,7 @@ func (q *Queries) HighlightsSince(ctx context.Context, arg HighlightsSinceParams
 			&i.Text,
 			&i.Section,
 			&i.Anchor,
+			&i.Color,
 			&i.CreatedAt,
 			&i.Deleted,
 		); err != nil {
@@ -165,8 +167,8 @@ func (q *Queries) HighlightsSince(ctx context.Context, arg HighlightsSinceParams
 }
 
 const insertHighlight = `-- name: InsertHighlight :exec
-INSERT INTO highlights (id, user_id, source_id, text, section, anchor, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO highlights (id, user_id, source_id, text, section, anchor, color, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (id) DO NOTHING
 `
 
@@ -177,6 +179,7 @@ type InsertHighlightParams struct {
 	Text      string          `json:"text"`
 	Section   string          `json:"section"`
 	Anchor    json.RawMessage `json:"anchor"`
+	Color     string          `json:"color"`
 	CreatedAt time.Time       `json:"created_at"`
 }
 
@@ -188,6 +191,7 @@ func (q *Queries) InsertHighlight(ctx context.Context, arg InsertHighlightParams
 		arg.Text,
 		arg.Section,
 		arg.Anchor,
+		arg.Color,
 		arg.CreatedAt,
 	)
 	return err

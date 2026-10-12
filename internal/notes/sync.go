@@ -60,6 +60,7 @@ type PushAction struct {
 	Text      string          `json:"text"`
 	Section   string          `json:"section"`
 	Anchor    json.RawMessage `json:"anchor"`
+	Color     string          `json:"color"`
 	CreatedAt string          `json:"created_at"`
 }
 
@@ -208,7 +209,7 @@ func apply(ctx context.Context, q *db.Queries, userID uuid.UUID, a PushAction, m
 		}
 		return "", q.InsertHighlight(ctx, db.InsertHighlightParams{
 			ID: id, UserID: userID, SourceID: sourceID, Text: text, Section: clip(a.Section, 300),
-			Anchor: anchor(a.Anchor), CreatedAt: createdAt(a.CreatedAt),
+			Anchor: anchor(a.Anchor), Color: color(a.Color), CreatedAt: createdAt(a.CreatedAt),
 		})
 
 	case "delete_highlight":
@@ -362,6 +363,16 @@ func anchor(raw json.RawMessage) json.RawMessage {
 		return nil
 	}
 	return raw
+}
+
+// color is one of the four highlighter colours; anything else is yellow, as a bad colour is
+// not worth rejecting a note over.
+func color(c string) string {
+	switch c {
+	case "pink", "blue", "green":
+		return c
+	}
+	return "yellow"
 }
 
 // createdAt trusts the device's clock, within reason.

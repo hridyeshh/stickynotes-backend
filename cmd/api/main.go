@@ -96,18 +96,20 @@ func routes(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
 	notesH := notes.NewHandler(pool)
 
 	r := chi.NewRouter()
-	r.Use(chimiddleware.RealIP) // trusts X-Forwarded-For: right behind Railway's proxy, wrong if exposed directly
+	// Railway's edge is the one proxy in front of us. It appends the address it saw to X-Forwarded-For, so the
+	// rightmost entry is the client; anything to its left came from the client and is not trusted.
+	r.Use(chimiddleware.ClientIPFromXFFTrustedProxies(1))
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 	r.Use(chimiddleware.RequestSize(1 << 20))
 
-	// Rate limits key on the Bearer token when present, else on IP.
+	// Rate limits key on the user when the request has a valid access token, else on the client IP.
 	// ponytail: /auth/refresh has no Bearer, so every web user's refresh shares the
 	// Next server's egress-IP bucket; key refresh by token hash if 300/min ever bites.
 	limit := func(perMinute int) func(http.Handler) http.Handler {
 		return httprate.Limit(perMinute, time.Minute,
-			httprate.WithKeyFuncs(appMiddleware.KeyByAuthorizationOrIP),
+			httprate.WithKeyFuncs(appMiddleware.KeyByUserOrIP(cfg.JWTSecret)),
 			httprate.WithLimitHandler(func(w http.ResponseWriter, _ *http.Request) {
 				types.WriteError(w, http.StatusTooManyRequests, types.ErrCodeRateLimited, "Too many requests")
 			}),

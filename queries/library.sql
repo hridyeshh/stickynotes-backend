@@ -12,7 +12,7 @@ WHERE user_id = @user_id AND deleted_at IS NULL
 ORDER BY created_at;
 
 -- name: LibraryHighlights :many
-SELECT h.id, h.source_id, h.text, h.section, h.created_at
+SELECT h.id, h.source_id, h.text, h.section, h.color, h.created_at
 FROM highlights h
 JOIN sources s ON s.id = h.source_id
 WHERE h.user_id = @user_id AND h.deleted_at IS NULL

@@ -240,17 +240,18 @@ func (q *Queries) SetTopicShare(ctx context.Context, arg SetTopicShareParams) (S
 }
 
 const sharedTopic = `-- name: SharedTopic :one
-SELECT t.id, t.user_id, t.title, u.name AS author
+SELECT t.id, t.user_id, t.title, u.name AS author, u.avatar AS author_avatar
 FROM topics t
 JOIN users u ON u.id = t.user_id
 WHERE t.share_slug = $1 AND t.is_public AND t.deleted_at IS NULL
 `
 
 type SharedTopicRow struct {
-	ID     uuid.UUID `json:"id"`
-	UserID uuid.UUID `json:"user_id"`
-	Title  string    `json:"title"`
-	Author string    `json:"author"`
+	ID           uuid.UUID `json:"id"`
+	UserID       uuid.UUID `json:"user_id"`
+	Title        string    `json:"title"`
+	Author       string    `json:"author"`
+	AuthorAvatar string    `json:"author_avatar"`
 }
 
 // Only what a share page shows: no email, no ids beyond the topic's.
@@ -262,6 +263,7 @@ func (q *Queries) SharedTopic(ctx context.Context, slug pgtype.Text) (SharedTopi
 		&i.UserID,
 		&i.Title,
 		&i.Author,
+		&i.AuthorAvatar,
 	)
 	return i, err
 }

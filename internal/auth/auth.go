@@ -10,6 +10,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -152,6 +153,26 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	types.WriteJSON(w, http.StatusOK, res)
 }
 
+// avatarKey is the shape of an avatar key. The website owns the set (public/avatars) and shows a default for a key
+// it doesn't have, so only the shape is checked here.
+var avatarKey = regexp.MustCompile(`^[a-z0-9-]{0,32}$`)
+
+// UpdateMe handles PATCH /api/v1/me: the avatar picked on the website.
+func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	var req types.UpdateMeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !avatarKey.MatchString(req.Avatar) {
+		types.WriteError(w, http.StatusBadRequest, types.ErrCodeValidation, "Invalid avatar")
+		return
+	}
+	id, _ := reqctx.GetUserID(r.Context())
+	if err := h.q.SetUserAvatar(r.Context(), db.SetUserAvatarParams{ID: id, Avatar: req.Avatar}); err != nil {
+		slog.Error("update me: set avatar", "error", err)
+		types.WriteInternalError(w)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // Devices handles GET /api/v1/devices: every browser and extension signed in.
 func (h *Handler) Devices(w http.ResponseWriter, r *http.Request) {
 	devices, err := h.devices(r)
@@ -253,7 +274,7 @@ func (h *Handler) startSession(w http.ResponseWriter, r *http.Request, user db.U
 }
 
 func toUserResponse(u db.User) types.UserResponse {
-	return types.UserResponse{ID: u.ID.String(), Email: u.Email, Name: u.Name, AvatarURL: u.AvatarUrl}
+	return types.UserResponse{ID: u.ID.String(), Email: u.Email, Name: u.Name, AvatarURL: u.AvatarUrl, Avatar: u.Avatar}
 }
 
 // generateSecureToken returns 32 random bytes, hex-encoded.

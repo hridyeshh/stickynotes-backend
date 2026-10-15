@@ -137,6 +137,7 @@ func routes(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(appMiddleware.Authenticate(cfg.JWTSecret))
 			r.Get("/me", authH.Me)
+			r.Patch("/me", authH.UpdateMe)
 			r.Delete("/me", authH.DeleteMe)
 			r.Post("/extension/codes", authH.ExtensionCode)
 			r.Post("/sync/push", notesH.Push)

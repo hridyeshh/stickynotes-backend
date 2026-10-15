@@ -26,12 +26,13 @@ type LibraryResponse struct {
 	Highlights []db.LibraryHighlightsRow `json:"highlights"`
 }
 
-// SharedResponse is one public topic: its title, the author's name, and its notes.
+// SharedResponse is one public topic: its title, the author's name and avatar, and its notes.
 type SharedResponse struct {
-	Title      string                    `json:"title"`
-	Author     string                    `json:"author"`
-	Sources    []db.LibrarySourcesRow    `json:"sources"`
-	Highlights []db.LibraryHighlightsRow `json:"highlights"`
+	Title        string                    `json:"title"`
+	Author       string                    `json:"author"`
+	AuthorAvatar string                    `json:"author_avatar"`
+	Sources      []db.LibrarySourcesRow    `json:"sources"`
+	Highlights   []db.LibraryHighlightsRow `json:"highlights"`
 }
 
 // ShareRequest is the body of POST /topics/{id}/share.
@@ -107,7 +108,7 @@ func (h *Handler) shared(ctx context.Context, slug string) (SharedResponse, erro
 		return res, err
 	}
 	topic := pgtype.UUID{Bytes: t.ID, Valid: true}
-	res.Title, res.Author = t.Title, t.Author
+	res.Title, res.Author, res.AuthorAvatar = t.Title, t.Author, t.AuthorAvatar
 	if res.Sources, err = q.LibrarySources(ctx, db.LibrarySourcesParams{UserID: t.UserID, TopicID: topic}); err != nil {
 		return res, err
 	}

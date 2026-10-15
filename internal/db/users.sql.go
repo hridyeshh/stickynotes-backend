@@ -22,7 +22,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, google_sub, email, name, avatar_url, created_at, updated_at FROM users WHERE id = $1
+SELECT id, google_sub, email, name, avatar_url, created_at, updated_at, avatar FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -36,8 +36,23 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.AvatarUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Avatar,
 	)
 	return i, err
+}
+
+const setUserAvatar = `-- name: SetUserAvatar :exec
+UPDATE users SET avatar = $2 WHERE id = $1
+`
+
+type SetUserAvatarParams struct {
+	ID     uuid.UUID `json:"id"`
+	Avatar string    `json:"avatar"`
+}
+
+func (q *Queries) SetUserAvatar(ctx context.Context, arg SetUserAvatarParams) error {
+	_, err := q.db.Exec(ctx, setUserAvatar, arg.ID, arg.Avatar)
+	return err
 }
 
 const upsertGoogleUser = `-- name: UpsertGoogleUser :one
@@ -45,7 +60,7 @@ INSERT INTO users (google_sub, email, name, avatar_url)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (google_sub) DO UPDATE
 SET email = EXCLUDED.email, name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url
-RETURNING id, google_sub, email, name, avatar_url, created_at, updated_at
+RETURNING id, google_sub, email, name, avatar_url, created_at, updated_at, avatar
 `
 
 type UpsertGoogleUserParams struct {
@@ -72,6 +87,7 @@ func (q *Queries) UpsertGoogleUser(ctx context.Context, arg UpsertGoogleUserPara
 		&i.AvatarUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Avatar,
 	)
 	return i, err
 }

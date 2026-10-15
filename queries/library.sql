@@ -21,7 +21,7 @@ ORDER BY h.created_at;
 
 -- name: SharedTopic :one
 -- Only what a share page shows: no email, no ids beyond the topic's.
-SELECT t.id, t.user_id, t.title, u.name AS author
+SELECT t.id, t.user_id, t.title, u.name AS author, u.avatar AS author_avatar
 FROM topics t
 JOIN users u ON u.id = t.user_id
 WHERE t.share_slug = @slug AND t.is_public AND t.deleted_at IS NULL;

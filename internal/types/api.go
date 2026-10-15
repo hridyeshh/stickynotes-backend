@@ -45,6 +45,12 @@ type UserResponse struct {
 	Email     string `json:"email"`
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatar_url"`
+	Avatar    string `json:"avatar"` // picked on the website; "" until then
+}
+
+// UpdateMeRequest is PATCH /me: the avatar picked on the website.
+type UpdateMeRequest struct {
+	Avatar string `json:"avatar"`
 }
 
 // MeResponse is GET /me: the user, and when a connected extension last refreshed

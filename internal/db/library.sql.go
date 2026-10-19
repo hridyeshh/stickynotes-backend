@@ -111,7 +111,7 @@ func (q *Queries) LibrarySources(ctx context.Context, arg LibrarySourcesParams) 
 }
 
 const libraryTopics = `-- name: LibraryTopics :many
-SELECT id, title, is_public, share_slug, created_at
+SELECT id, title, is_public, share_slug, tags, created_at
 FROM topics
 WHERE user_id = $1 AND deleted_at IS NULL
 ORDER BY created_at
@@ -122,6 +122,7 @@ type LibraryTopicsRow struct {
 	Title     string      `json:"title"`
 	IsPublic  bool        `json:"is_public"`
 	ShareSlug pgtype.Text `json:"share_slug"`
+	Tags      []string    `json:"tags"`
 	CreatedAt time.Time   `json:"created_at"`
 }
 
@@ -139,6 +140,7 @@ func (q *Queries) LibraryTopics(ctx context.Context, userID uuid.UUID) ([]Librar
 			&i.Title,
 			&i.IsPublic,
 			&i.ShareSlug,
+			&i.Tags,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -237,6 +239,26 @@ func (q *Queries) SetTopicShare(ctx context.Context, arg SetTopicShareParams) (S
 	var i SetTopicShareRow
 	err := row.Scan(&i.IsPublic, &i.ShareSlug)
 	return i, err
+}
+
+const setTopicTags = `-- name: SetTopicTags :execrows
+UPDATE topics
+SET tags = $1::text[]
+WHERE id = $2 AND user_id = $3 AND deleted_at IS NULL
+`
+
+type SetTopicTagsParams struct {
+	Tags   []string  `json:"tags"`
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) SetTopicTags(ctx context.Context, arg SetTopicTagsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setTopicTags, arg.Tags, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const sharedTopic = `-- name: SharedTopic :one

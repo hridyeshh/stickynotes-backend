@@ -39,6 +39,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if cfg.GeminiAPIKey == "" || cfg.BraveAPIKey == "" {
+		slog.Warn("reading suggestions find nothing until GEMINI_API_KEY and BRAVE_SEARCH_API_KEY are set")
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -93,7 +97,7 @@ func main() {
 // routes builds the HTTP handler. It is separate from main so tests run the real router.
 func routes(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
 	authH := auth.NewHandler(db.New(pool), cfg)
-	notesH := notes.NewHandler(pool)
+	notesH := notes.NewHandler(pool, cfg)
 
 	r := chi.NewRouter()
 	// Railway's edge is the one proxy in front of us. It appends the address it saw to X-Forwarded-For, so the
@@ -145,6 +149,9 @@ func routes(cfg *config.Config, pool *pgxpool.Pool) http.Handler {
 			// The web library reads here and edits through /sync/push.
 			r.Get("/library", notesH.Library)
 			r.Post("/topics/{id}/share", notesH.Share)
+			r.Put("/topics/{id}/tags", notesH.Tags)
+			// Reading suggestions, for users who turned them on: may call Gemini and Brave (notes/suggest.go).
+			r.Get("/topics/{id}/suggestions", notesH.Suggestions)
 			r.Get("/devices", authH.Devices)
 			r.Delete("/devices/{id}", authH.RevokeDevice)
 		})

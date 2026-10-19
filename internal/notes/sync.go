@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -17,7 +18,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/singleflight"
 
+	"github.com/hridyeshh/stickynotes-backend/internal/config"
 	"github.com/hridyeshh/stickynotes-backend/internal/db"
 	"github.com/hridyeshh/stickynotes-backend/internal/reqctx"
 	"github.com/hridyeshh/stickynotes-backend/internal/types"
@@ -30,14 +33,18 @@ const (
 	pullOverlap = 5 * time.Minute
 )
 
-// Handler serves the /sync routes.
+// Handler serves the /sync, library and topic routes.
 type Handler struct {
 	pool *pgxpool.Pool
+	cfg  *config.Config
+	// Reading suggestions (suggest.go): one build per topic at a time, and none for a while after the APIs fail.
+	builds      singleflight.Group
+	pausedUntil atomic.Int64 // unix nanoseconds
 }
 
 // NewHandler returns a notes Handler.
-func NewHandler(pool *pgxpool.Pool) *Handler {
-	return &Handler{pool: pool}
+func NewHandler(pool *pgxpool.Pool, cfg *config.Config) *Handler {
+	return &Handler{pool: pool, cfg: cfg}
 }
 
 // PushRequest is the body of POST /sync/push.
@@ -282,6 +289,9 @@ func apply(ctx context.Context, q *db.Queries, userID uuid.UUID, a PushAction, m
 			return "no such topic to merge into", nil
 		}
 		if err := q.MoveTopicSources(ctx, db.MoveTopicSourcesParams{FromID: id, IntoID: topicID, UserID: userID}); err != nil {
+			return "", err
+		}
+		if err := q.MergeTopicTags(ctx, db.MergeTopicTagsParams{FromID: id, IntoID: topicID, UserID: userID}); err != nil {
 			return "", err
 		}
 		return "", q.DeleteTopic(ctx, db.DeleteTopicParams{ID: id, UserID: userID})

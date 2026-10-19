@@ -11,9 +11,11 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -26,6 +28,9 @@ import (
 )
 
 type caller func(method, path, bearer, body string, want int, out any)
+
+// geminiCalls counts requests to the Gemini stand-in (newTestAPI), so a test can tell a build from a saved result.
+var geminiCalls atomic.Int32
 
 // newTestAPI serves the real router against a real Postgres. Google is stubbed: the
 // id_token sent at sign-in becomes the account's Google subject, so each test makes
@@ -54,10 +59,28 @@ func newTestAPI(t *testing.T) caller {
 	}))
 	t.Cleanup(google.Close)
 
+	// Stand-ins for Gemini and Brave: two searches, each finding a page the topic already has and one it doesn't.
+	gemini := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		geminiCalls.Add(1)
+		reply := `{"queries": ["ring", "jump"], "tags": ["Hashing", "Consistent Hashing"]}`
+		_ = json.NewEncoder(w).Encode(map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"parts": []any{map[string]string{"text": reply}}}}}})
+	}))
+	t.Cleanup(gemini.Close)
+	brave := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		_ = json.NewEncoder(w).Encode(map[string]any{"web": map[string]any{"results": []map[string]string{
+			{"title": "Already read", "url": "https://read.example/ring"},
+			{"title": "More on " + q, "url": "https://more.example/" + q},
+		}}})
+	}))
+	t.Cleanup(brave.Close)
+
 	cfg := &config.Config{
 		JWTSecret:          strings.Repeat("s", 32),
 		GoogleClientIDs:    []string{"test-client"},
 		GoogleTokenInfoURL: google.URL,
+		GeminiAPIKey:       "test", GeminiModels: []string{"test"}, GeminiURL: gemini.URL + "/",
+		BraveAPIKey: "test", BraveURL: brave.URL,
 	}
 	api := httptest.NewServer(routes(cfg, pool))
 	t.Cleanup(api.Close)
@@ -419,4 +442,101 @@ func TestLibrary(t *testing.T) {
 
 	call("DELETE", "/api/v1/me", tok, "", http.StatusNoContent, nil)
 	call("DELETE", "/api/v1/me", other.AccessToken, "", http.StatusNoContent, nil)
+}
+
+// TestTagsAndSuggestions covers tags (cleaned, owner-only, kept through a merge) and reading suggestions: off until the
+// user turns them on, built once and then served from what was saved, without pages the topic already has or tags it
+// already wears, and deleted when turned off.
+func TestTagsAndSuggestions(t *testing.T) {
+	call := newTestAPI(t)
+	signIn := func() string {
+		var s types.AuthResponse
+		call("POST", "/api/v1/auth/google", "", `{"id_token":"`+uuid.NewString()+`"}`, http.StatusOK, &s)
+		return s.AccessToken
+	}
+	tok, other := signIn(), signIn()
+	push := func(actions ...string) {
+		t.Helper()
+		var res notes.PushResponse
+		call("POST", "/api/v1/sync/push", tok, `{"actions":[`+strings.Join(actions, ",")+`]}`, http.StatusOK, &res)
+		if len(res.Rejected) != 0 {
+			t.Fatalf("push: %+v", res)
+		}
+	}
+	topic := func(id, title string) string {
+		return fmt.Sprintf(`{"type":"create_topic","id":%q,"title":%q}`, id, title)
+	}
+	note := func(topicID, url string) string {
+		return fmt.Sprintf(`{"type":"create_highlight","id":%q,"topic_id":%q,"url":%q,"text":"Keys map onto a ring.","created_at":"2026-10-09T08:00:00Z"}`,
+			uuid.NewString(), topicID, url)
+	}
+	suggestions := func(bearer, id string, want int) notes.SuggestionsResponse {
+		t.Helper()
+		var res notes.SuggestionsResponse
+		call("GET", "/api/v1/topics/"+id+"/suggestions", bearer, "", want, &res)
+		return res
+	}
+	t1, t2 := uuid.NewString(), uuid.NewString()
+	push(topic(t1, "Consistent hashing"), topic(t2, "Hashing"), note(t1, "https://read.example/ring"), note(t2, "https://b.example/2"))
+
+	// Tags are cleaned on the way in, and only the topic's owner sets them.
+	var tags notes.TagsRequest
+	call("PUT", "/api/v1/topics/"+t1+"/tags", tok, `{"tags":[" #Systems ","systems","Hashing"]}`, http.StatusOK, &tags)
+	if !reflect.DeepEqual(tags.Tags, []string{"systems", "hashing"}) {
+		t.Fatalf("tags = %q", tags.Tags)
+	}
+	call("PUT", "/api/v1/topics/"+t1+"/tags", other, `{"tags":["mine"]}`, http.StatusNotFound, nil)
+	call("PUT", "/api/v1/topics/"+t2+"/tags", tok, `{"tags":["go","systems"]}`, http.StatusOK, nil)
+
+	// Off until turned on; PATCH /me changes only the fields it is sent.
+	var me types.MeResponse
+	call("GET", "/api/v1/me", tok, "", http.StatusOK, &me)
+	if me.Suggestions != nil {
+		t.Fatalf("suggestions before deciding = %v, want null", *me.Suggestions)
+	}
+	suggestions(tok, t1, http.StatusForbidden)
+	call("PATCH", "/api/v1/me", tok, `{"suggestions":true}`, http.StatusNoContent, nil)
+	call("PATCH", "/api/v1/me", tok, `{"avatar":"owl"}`, http.StatusNoContent, nil)
+	call("GET", "/api/v1/me", tok, "", http.StatusOK, &me)
+	if me.Suggestions == nil || !*me.Suggestions || me.Avatar != "owl" {
+		t.Fatalf("/me after turning suggestions on: %+v", me)
+	}
+
+	// The first visit builds; later ones read what was saved, even after a new note, until a day has passed.
+	calls := geminiCalls.Load()
+	got := suggestions(tok, t1, http.StatusOK)
+	var urls []string
+	for _, l := range got.Links {
+		urls = append(urls, l.URL)
+	}
+	if !reflect.DeepEqual(urls, []string{"https://more.example/ring", "https://more.example/jump"}) || !reflect.DeepEqual(got.Tags, []string{"consistent hashing"}) {
+		t.Fatalf("suggestions = %+v: want the unread pages and the tag the topic lacks", got)
+	}
+	push(note(t1, "https://c.example/3"))
+	suggestions(tok, t1, http.StatusOK)
+	if n := geminiCalls.Load() - calls; n != 1 {
+		t.Fatalf("Gemini was asked %d times, want once", n)
+	}
+	call("PATCH", "/api/v1/me", other, `{"suggestions":true}`, http.StatusNoContent, nil)
+	suggestions(other, t1, http.StatusNotFound)
+
+	// Merging keeps both topics' tags.
+	push(fmt.Sprintf(`{"type":"merge_topic","id":%q,"topic_id":%q}`, t2, t1))
+	var lib notes.LibraryResponse
+	call("GET", "/api/v1/library", tok, "", http.StatusOK, &lib)
+	if len(lib.Topics) != 1 || !reflect.DeepEqual(lib.Topics[0].Tags, []string{"systems", "hashing", "go"}) {
+		t.Fatalf("after merge: %+v", lib.Topics)
+	}
+
+	// Turning suggestions off deletes what they found: on again, the topic builds afresh.
+	call("PATCH", "/api/v1/me", tok, `{"suggestions":false}`, http.StatusNoContent, nil)
+	suggestions(tok, t1, http.StatusForbidden)
+	call("PATCH", "/api/v1/me", tok, `{"suggestions":true}`, http.StatusNoContent, nil)
+	suggestions(tok, t1, http.StatusOK)
+	if n := geminiCalls.Load() - calls; n != 2 {
+		t.Fatalf("Gemini was asked %d times, want a second build after turning suggestions back on", n)
+	}
+
+	call("DELETE", "/api/v1/me", tok, "", http.StatusNoContent, nil)
+	call("DELETE", "/api/v1/me", other, "", http.StatusNoContent, nil)
 }

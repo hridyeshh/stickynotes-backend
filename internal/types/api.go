@@ -46,11 +46,14 @@ type UserResponse struct {
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatar_url"`
 	Avatar    string `json:"avatar"` // picked on the website; "" until then
+	// Reading suggestions: null until the user turns them on or declines.
+	Suggestions *bool `json:"suggestions"`
 }
 
-// UpdateMeRequest is PATCH /me: the avatar picked on the website.
+// UpdateMeRequest is PATCH /me: what the website changes. A field left out stays as it is.
 type UpdateMeRequest struct {
-	Avatar string `json:"avatar"`
+	Avatar      *string `json:"avatar"`
+	Suggestions *bool   `json:"suggestions"`
 }
 
 // MeResponse is GET /me: the user, and when a connected extension last refreshed

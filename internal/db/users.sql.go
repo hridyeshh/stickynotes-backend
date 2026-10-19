@@ -22,7 +22,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, google_sub, email, name, avatar_url, created_at, updated_at, avatar FROM users WHERE id = $1
+SELECT id, google_sub, email, name, avatar_url, created_at, updated_at, avatar, suggestions FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -37,6 +37,7 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Avatar,
+		&i.Suggestions,
 	)
 	return i, err
 }
@@ -55,12 +56,26 @@ func (q *Queries) SetUserAvatar(ctx context.Context, arg SetUserAvatarParams) er
 	return err
 }
 
+const setUserSuggestions = `-- name: SetUserSuggestions :exec
+UPDATE users SET suggestions = $1::boolean WHERE id = $2
+`
+
+type SetUserSuggestionsParams struct {
+	Suggestions bool      `json:"suggestions"`
+	ID          uuid.UUID `json:"id"`
+}
+
+func (q *Queries) SetUserSuggestions(ctx context.Context, arg SetUserSuggestionsParams) error {
+	_, err := q.db.Exec(ctx, setUserSuggestions, arg.Suggestions, arg.ID)
+	return err
+}
+
 const upsertGoogleUser = `-- name: UpsertGoogleUser :one
 INSERT INTO users (google_sub, email, name, avatar_url)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (google_sub) DO UPDATE
 SET email = EXCLUDED.email, name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url
-RETURNING id, google_sub, email, name, avatar_url, created_at, updated_at, avatar
+RETURNING id, google_sub, email, name, avatar_url, created_at, updated_at, avatar, suggestions
 `
 
 type UpsertGoogleUserParams struct {
@@ -88,6 +103,7 @@ func (q *Queries) UpsertGoogleUser(ctx context.Context, arg UpsertGoogleUserPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Avatar,
+		&i.Suggestions,
 	)
 	return i, err
 }

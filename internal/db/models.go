@@ -64,15 +64,26 @@ type Topic struct {
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+	Tags      []string           `json:"tags"`
+}
+
+type TopicSuggestion struct {
+	TopicID  uuid.UUID       `json:"topic_id"`
+	UserID   uuid.UUID       `json:"user_id"`
+	NotesKey string          `json:"notes_key"`
+	Links    json.RawMessage `json:"links"`
+	Tags     []string        `json:"tags"`
+	BuiltAt  time.Time       `json:"built_at"`
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	GoogleSub string    `json:"google_sub"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	AvatarUrl string    `json:"avatar_url"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Avatar    string    `json:"avatar"`
+	ID          uuid.UUID   `json:"id"`
+	GoogleSub   string      `json:"google_sub"`
+	Email       string      `json:"email"`
+	Name        string      `json:"name"`
+	AvatarUrl   string      `json:"avatar_url"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+	Avatar      string      `json:"avatar"`
+	Suggestions pgtype.Bool `json:"suggestions"`
 }

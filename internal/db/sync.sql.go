@@ -216,6 +216,28 @@ func (q *Queries) InsertTopic(ctx context.Context, arg InsertTopicParams) error 
 	return err
 }
 
+const mergeTopicTags = `-- name: MergeTopicTags :exec
+UPDATE topics t
+SET tags = (
+    SELECT coalesce((array_agg(tag ORDER BY first))[1:12], '{}')
+    FROM (SELECT tag, min(n) AS first FROM unnest(t.tags || f.tags) WITH ORDINALITY AS u(tag, n) GROUP BY tag) merged
+)
+FROM topics f
+WHERE t.id = $1 AND t.user_id = $2 AND f.id = $3 AND f.user_id = $2
+`
+
+type MergeTopicTagsParams struct {
+	IntoID uuid.UUID `json:"into_id"`
+	UserID uuid.UUID `json:"user_id"`
+	FromID uuid.UUID `json:"from_id"`
+}
+
+// Merging keeps both topics' tags, the target's first, up to the 12 a topic may have.
+func (q *Queries) MergeTopicTags(ctx context.Context, arg MergeTopicTagsParams) error {
+	_, err := q.db.Exec(ctx, mergeTopicTags, arg.IntoID, arg.UserID, arg.FromID)
+	return err
+}
+
 const moveSource = `-- name: MoveSource :execrows
 UPDATE sources s
 SET topic_id = t.id

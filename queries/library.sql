@@ -1,5 +1,5 @@
 -- name: LibraryTopics :many
-SELECT id, title, is_public, share_slug, created_at
+SELECT id, title, is_public, share_slug, tags, created_at
 FROM topics
 WHERE user_id = @user_id AND deleted_at IS NULL
 ORDER BY created_at;
@@ -34,6 +34,11 @@ SET is_public  = @is_public::boolean,
     share_slug = CASE WHEN @is_public::boolean THEN coalesce(share_slug, @new_slug) END
 WHERE id = @id AND user_id = @user_id AND deleted_at IS NULL
 RETURNING is_public, share_slug;
+
+-- name: SetTopicTags :execrows
+UPDATE topics
+SET tags = @tags::text[]
+WHERE id = @id AND user_id = @user_id AND deleted_at IS NULL;
 
 -- name: ListDevices :many
 -- A device's session is its one live refresh token; refreshing replaces the row,

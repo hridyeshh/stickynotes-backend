@@ -157,16 +157,32 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 // it doesn't have, so only the shape is checked here.
 var avatarKey = regexp.MustCompile(`^[a-z0-9-]{0,32}$`)
 
-// UpdateMe handles PATCH /api/v1/me: the avatar picked on the website.
+// UpdateMe handles PATCH /api/v1/me: the avatar picked on the website, and reading suggestions on or off. Turning
+// suggestions off also deletes what they found for the user's topics.
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	var req types.UpdateMeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !avatarKey.MatchString(req.Avatar) {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		types.WriteError(w, http.StatusBadRequest, types.ErrCodeValidation, "Invalid JSON body")
+		return
+	}
+	if req.Avatar != nil && !avatarKey.MatchString(*req.Avatar) {
 		types.WriteError(w, http.StatusBadRequest, types.ErrCodeValidation, "Invalid avatar")
 		return
 	}
-	id, _ := reqctx.GetUserID(r.Context())
-	if err := h.q.SetUserAvatar(r.Context(), db.SetUserAvatarParams{ID: id, Avatar: req.Avatar}); err != nil {
-		slog.Error("update me: set avatar", "error", err)
+	ctx := r.Context()
+	id, _ := reqctx.GetUserID(ctx)
+	var err error
+	if req.Avatar != nil {
+		err = h.q.SetUserAvatar(ctx, db.SetUserAvatarParams{ID: id, Avatar: *req.Avatar})
+	}
+	if err == nil && req.Suggestions != nil {
+		err = h.q.SetUserSuggestions(ctx, db.SetUserSuggestionsParams{ID: id, Suggestions: *req.Suggestions})
+	}
+	if err == nil && req.Suggestions != nil && !*req.Suggestions {
+		err = h.q.DeleteUserSuggestions(ctx, id)
+	}
+	if err != nil {
+		slog.Error("update me", "error", err)
 		types.WriteInternalError(w)
 		return
 	}
@@ -274,7 +290,11 @@ func (h *Handler) startSession(w http.ResponseWriter, r *http.Request, user db.U
 }
 
 func toUserResponse(u db.User) types.UserResponse {
-	return types.UserResponse{ID: u.ID.String(), Email: u.Email, Name: u.Name, AvatarURL: u.AvatarUrl, Avatar: u.Avatar}
+	res := types.UserResponse{ID: u.ID.String(), Email: u.Email, Name: u.Name, AvatarURL: u.AvatarUrl, Avatar: u.Avatar}
+	if u.Suggestions.Valid {
+		res.Suggestions = &u.Suggestions.Bool
+	}
+	return res
 }
 
 // generateSecureToken returns 32 random bytes, hex-encoded.

@@ -12,6 +12,9 @@ SELECT * FROM users WHERE id = $1;
 -- name: SetUserAvatar :exec
 UPDATE users SET avatar = $2 WHERE id = $1;
 
+-- name: SetUserSuggestions :exec
+UPDATE users SET suggestions = @suggestions::boolean WHERE id = @id;
+
 -- name: DeleteUser :exec
 -- Cascades to every token, topic, source and highlight.
 DELETE FROM users WHERE id = $1;

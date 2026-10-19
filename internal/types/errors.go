@@ -21,6 +21,7 @@ const (
 	ErrCodeInvalidToken   = "INVALID_TOKEN"
 	ErrCodeExpiredToken   = "EXPIRED_TOKEN"
 	ErrCodeNotFound       = "NOT_FOUND"
+	ErrCodeForbidden      = "FORBIDDEN"
 )
 
 // WriteError writes a JSON error response.

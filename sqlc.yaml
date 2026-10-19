@@ -23,3 +23,5 @@ sql:
           # Anchors pass through to clients as JSON, not base64.
           - column: "highlights.anchor"
             go_type: "encoding/json.RawMessage"
+          - column: "topic_suggestions.links"
+            go_type: "encoding/json.RawMessage"

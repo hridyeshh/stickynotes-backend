@@ -99,6 +99,16 @@ FROM topics t
 WHERE s.topic_id = @from_id AND s.user_id = @user_id AND s.deleted_at IS NULL
   AND t.id = @into_id AND t.user_id = @user_id AND t.deleted_at IS NULL;
 
+-- name: MergeTopicTags :exec
+-- Merging keeps both topics' tags, the target's first, up to the 12 a topic may have.
+UPDATE topics t
+SET tags = (
+    SELECT coalesce((array_agg(tag ORDER BY first))[1:12], '{}')
+    FROM (SELECT tag, min(n) AS first FROM unnest(t.tags || f.tags) WITH ORDINALITY AS u(tag, n) GROUP BY tag) merged
+)
+FROM topics f
+WHERE t.id = @into_id AND t.user_id = @user_id AND f.id = @from_id AND f.user_id = @user_id;
+
 -- name: DeleteTopicHighlights :exec
 UPDATE highlights h
 SET deleted_at = now(), text = '', anchor = NULL

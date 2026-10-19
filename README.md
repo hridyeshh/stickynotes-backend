@@ -4,7 +4,7 @@
 
 The REST API for [stickynotes](https://www.stickynotes.in): a browser extension and web library that keeps the passages you select on any page, filed by topic with every source listed. A single Go service backs the Manifest V3 extension, the Next.js web app and the public share pages.
 
-**Website:** [stickynotes.in](https://www.stickynotes.in) · **API:** [stickynotes-backend-production.up.railway.app](https://stickynotes-backend-production.up.railway.app/health) · **Extension:** [Chrome Web Store](https://chromewebstore.google.com/detail/stickynotes/fciennljceeoagambkjppepghigkcnep) · **Contact:** contactus@paperboxd.in
+**Website:** [stickynotes.in](https://www.stickynotes.in) · **API:** [stickynotes-backend-production.up.railway.app](https://stickynotes-backend-production.up.railway.app/health) · **Extension:** [Chrome Web Store](https://chromewebstore.google.com/detail/stickynotes/fciennljceeoagambkjppepghigkcnep) · **Contact:** contact@paperboxd.in
 
 ---
 
@@ -692,7 +692,7 @@ Also: revoked refresh tokens and used extension codes are never deleted (only an
 
 ## Contact
 
-**Email:** contactus@paperboxd.in  
+**Email:** contact@paperboxd.in  
 **Website:** [stickynotes.in](https://www.stickynotes.in), a [PaperBoxd](https://paperboxd.in) production
 
 ---
